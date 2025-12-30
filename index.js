@@ -105,14 +105,41 @@ const createVideo = async (jobId, image1Path, image2Path, duration, outputPath) 
       .on('start', (cmd) => {
         console.log('FFmpeg started:', cmd);
         const job = jobs.get(jobId);
-        if (job) job.status = 'processing';
+        if (job) {
+          job.status = 'processing';
+          job.started_at = new Date().toISOString();
+        }
       })
       .on('progress', (progress) => {
-        lastProgress = Math.round(progress.percent || 0);
+        // Calculate proper progress based on timemark
+        let calculatedProgress = 0;
+        if (progress.timemark) {
+          const parts = progress.timemark.split(':');
+          const seconds = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
+          calculatedProgress = Math.min(Math.round((seconds / duration) * 100), 99);
+        } else if (progress.percent) {
+          calculatedProgress = Math.min(Math.round(progress.percent), 99);
+        }
+        
+        lastProgress = calculatedProgress;
         const job = jobs.get(jobId);
-        if (job) {
+        if (job && calculatedProgress > 0) {
           job.progress = lastProgress;
-          console.log(`Job ${jobId}: ${lastProgress}% complete (frames: ${progress.frames}, fps: ${progress.currentFps})`);
+          
+          // Calculate remaining time based on progress
+          if (job.started_at) {
+            const elapsedMs = Date.now() - new Date(job.started_at).getTime();
+            const elapsedSec = elapsedMs / 1000;
+            const progressRatio = calculatedProgress / 100;
+            
+            if (progressRatio > 0.01) { // At least 1% progress
+              const totalEstimatedSec = elapsedSec / progressRatio;
+              const remainingSec = Math.max(0, Math.ceil(totalEstimatedSec - elapsedSec));
+              job.remaining_time_seconds = remainingSec;
+            }
+          }
+          
+          console.log(`Job ${jobId}: ${lastProgress}% complete (remaining: ~${job.remaining_time_seconds}s)`);
         }
       })
       .on('end', () => {
@@ -191,7 +218,8 @@ app.post('/convert', async (req, res) => {
     const outputPath = path.join('output', `${jobId}.mp4`);
     
     // Estimate: ~2-3x video duration for processing
-    const estimatedTime = Math.ceil(duration * 2.5);
+    // Add 30s for download time
+    const estimatedTime = Math.ceil(duration * 2.5) + 30;
     
     // Create job entry
     jobs.set(jobId, {
@@ -199,7 +227,9 @@ app.post('/convert', async (req, res) => {
       status: 'queued',
       progress: 0,
       created_at: new Date().toISOString(),
+      started_at: null,
       estimated_time_seconds: estimatedTime,
+      remaining_time_seconds: estimatedTime,
       duration: duration
     });
     
@@ -281,6 +311,7 @@ app.get('/status/:jobId', (req, res) => {
     progress: job.progress,
     created_at: job.created_at,
     estimated_time_seconds: job.estimated_time_seconds,
+    remaining_time_seconds: job.remaining_time_seconds || job.estimated_time_seconds,
     duration: job.duration,
     download_url: job.download_url || null,
     file_size_mb: job.file_size_mb || null,
