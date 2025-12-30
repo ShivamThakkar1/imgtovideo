@@ -43,8 +43,8 @@ const downloadImage = async (url, filepath) => {
   });
 };
 
-// Create video from images with timeout protection
-const createVideo = async (jobId, image1Path, image2Path, duration, outputPath) => {
+// Create video from images
+const createVideo = async (jobId, image1Path, image2Path, duration, outputPath, textPosition = 'bottom') => {
   return new Promise((resolve, reject) => {
     const halfDuration = duration / 2;
     
@@ -54,8 +54,23 @@ const createVideo = async (jobId, image1Path, image2Path, duration, outputPath) 
     
     const textStartTime = duration - 3;
     
+    // Calculate text Y position based on preference
+    let textY;
+    switch(textPosition) {
+      case 'top':
+        textY = '150'; // 150px from top
+        break;
+      case 'center':
+        textY = '(h-text_h)/2'; // Centered vertically
+        break;
+      case 'bottom':
+      default:
+        textY = 'h-150'; // 150px from bottom
+        break;
+    }
+    
     console.log(`Starting FFmpeg for job ${jobId}`);
-    console.log(`Duration: ${duration}s, Output: ${outputPath}`);
+    console.log(`Duration: ${duration}s, Text Position: ${textPosition}, Output: ${outputPath}`);
     
     // Keep-alive mechanism
     let lastProgress = 0;
@@ -90,7 +105,7 @@ const createVideo = async (jobId, image1Path, image2Path, duration, outputPath) 
         `[img1][img2]concat=n=2:v=1:a=0[v]`,
         
         // Add text
-        `[v]drawtext=text='Free Download Link in Bio':fontsize=60:fontcolor=white:x=(w-text_w)/2:y=h-150:borderw=3:bordercolor=black:enable='gte(t,${textStartTime})'[vout]`
+        `[v]drawtext=text='Free Download Link in Bio':fontsize=60:fontcolor=white:x=(w-text_w)/2:y=${textY}:borderw=3:bordercolor=black:enable='gte(t,${textStartTime})'[vout]`
       ])
       .outputOptions([
         '-map', '[vout]',
@@ -193,12 +208,13 @@ app.post('/convert', async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { image1_url, image2_url, duration = 30 } = req.body;
+    const { image1_url, image2_url, duration = 30, text_position = 'bottom' } = req.body;
     
     console.log('=== New conversion request ===');
     console.log('Image 1:', image1_url);
     console.log('Image 2:', image2_url);
     console.log('Duration:', duration);
+    console.log('Text Position:', text_position);
     
     if (!image1_url || !image2_url) {
       return res.status(400).json({ 
@@ -209,6 +225,12 @@ app.post('/convert', async (req, res) => {
     if (duration < 1 || duration > 300) {
       return res.status(400).json({ 
         error: 'Duration must be between 1 and 300 seconds (5 minutes max)' 
+      });
+    }
+    
+    if (!['top', 'center', 'bottom'].includes(text_position)) {
+      return res.status(400).json({ 
+        error: 'text_position must be one of: top, center, bottom' 
       });
     }
     
@@ -256,7 +278,7 @@ app.post('/convert', async (req, res) => {
         console.log(`[${jobId}] Images downloaded, starting video creation...`);
         
         // Create video
-        await createVideo(jobId, image1Path, image2Path, duration, outputPath);
+        await createVideo(jobId, image1Path, image2Path, duration, outputPath, text_position);
         
         console.log(`[${jobId}] Video created successfully`);
         
