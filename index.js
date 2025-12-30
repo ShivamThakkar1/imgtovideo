@@ -179,9 +179,9 @@ app.post('/convert', async (req, res) => {
       });
     }
     
-    if (![5, 30].includes(duration)) {
+    if (duration < 1 || duration > 300) {
       return res.status(400).json({ 
-        error: 'Duration must be either 5 or 30 seconds' 
+        error: 'Duration must be between 1 and 300 seconds (5 minutes max)' 
       });
     }
     
@@ -190,8 +190,8 @@ app.post('/convert', async (req, res) => {
     const image2Path = path.join('temp', `${jobId}_img2.jpg`);
     const outputPath = path.join('output', `${jobId}.mp4`);
     
-    // Estimate: ~1-2 minutes for 30s video on free tier
-    const estimatedTime = duration === 30 ? 120 : 60;
+    // Estimate: ~2-3x video duration for processing
+    const estimatedTime = Math.ceil(duration * 2.5);
     
     // Create job entry
     jobs.set(jobId, {
